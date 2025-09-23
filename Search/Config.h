@@ -1,22 +1,20 @@
 #pragma once
-#include <boost/property_tree/ini_parser.hpp>
-#include <boost/property_tree/ptree.hpp>
-#include <iostream>
 #include <string>
 
-class Config
+class Config 
 {
 public:
-    Config(std::string& filename);
+    Config(const std::string& filename);
 
-    std::string GetDbHost();
-    int GetDbPort();
-    std::string GetDbName();
-    std::string GetDbUser();
-    std::string GetDbPass();
-    std::string GetStartPage();
-    int GetRecursionDepth();
-    int GetServerPort();
+    std::string GetDbHost() const;
+    int GetDbPort() const;
+    std::string GetDbName() const;
+    std::string GetDbUser() const;
+    std::string GetDbPass() const;
+
+    std::string GetStartPage() const;
+    int GetRecursionDepth() const;
+    int GetServerPort() const;
 
 private:
     std::string m_dbHost;
@@ -27,6 +25,5 @@ private:
 
     std::string m_startPage;
     int m_recursionDepth;
-
     int m_serverPort;
 };

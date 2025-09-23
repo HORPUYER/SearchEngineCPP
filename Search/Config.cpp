@@ -1,6 +1,9 @@
 #include "Config.h"
 
-Config::Config(std::string& filename)
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/ini_parser.hpp>
+
+Config::Config(const std::string& filename)
 {
     boost::property_tree::ptree pt;
     boost::property_tree::ini_parser::read_ini(filename, pt);
@@ -17,42 +20,12 @@ Config::Config(std::string& filename)
     m_serverPort = pt.get<int>("Server.server_port");
 }
 
-std::string Config::GetDbHost()
-{
-    return m_dbHost;
-}
+std::string Config::GetDbHost() const { return m_dbHost; }
+int Config::GetDbPort() const { return m_dbPort; }
+std::string Config::GetDbName() const { return m_dbName; }
+std::string Config::GetDbUser() const { return m_dbUser; }
+std::string Config::GetDbPass() const { return m_dbPass; }
 
-int Config::GetDbPort()
-{
-    return m_dbPort;
-}
-
-std::string Config::GetDbName()
-{
-    return m_dbName;
-}
-
-std::string Config::GetDbUser()
-{
-    return m_dbUser;
-}
-
-std::string Config::GetDbPass()
-{
-    return m_dbPass;
-}
-
-std::string Config::GetStartPage()
-{
-    return m_startPage;
-}
-
-int Config::GetRecursionDepth()
-{
-    return m_recursionDepth;
-}
-
-int Config::GetServerPort()
-{
-    return m_serverPort;
-}
+std::string Config::GetStartPage() const { return m_startPage; }
+int Config::GetRecursionDepth() const { return m_recursionDepth; }
+int Config::GetServerPort() const { return m_serverPort; }

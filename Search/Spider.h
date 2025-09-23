@@ -21,7 +21,8 @@
 #include <mutex>
 #include <regex>
 
-class Spider {
+class Spider
+{
 public:
     Spider(Config& config, Database& db, std::size_t threads = 4);
     ~Spider();

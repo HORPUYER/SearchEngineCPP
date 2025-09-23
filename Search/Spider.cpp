@@ -12,17 +12,20 @@ namespace http = beast::http;
 namespace ssl = boost::asio::ssl;
 
 Spider::Spider(Config& config, Database& db, std::size_t threads)
-    : m_config(config), m_db(db), m_pool(threads), m_threads(threads) {
+    : m_config(config), m_db(db), m_pool(threads), m_threads(threads){
 }
 
-Spider::~Spider() {
+Spider::~Spider() 
+{
     try { m_pool.join(); }
     catch (...) {}
 }
 
-void Spider::run() {
+void Spider::run() 
+{
     std::string start = m_config.GetStartPage();
-    if (start.empty()) {
+    if (start.empty()) 
+    {
         std::cerr << "Start page not configured\n";
         return;
     }
@@ -34,7 +37,8 @@ void Spider::run() {
     m_pool.join();
 }
 
-void Spider::crawl(const std::string& url, int depth) {
+void Spider::crawl(const std::string& url, int depth)
+{
     if (depth > m_config.GetRecursionDepth()) return;
 
     {
@@ -43,10 +47,12 @@ void Spider::crawl(const std::string& url, int depth) {
     }
 
     std::string html;
-    try {
+    try
+    {
         html = fetchPage(url);
     }
-    catch (const std::exception& e) {
+    catch (const std::exception& e) 
+    {
         std::cerr << "fetchPage failed for " << url << " : " << e.what() << std::endl;
         return;
     }
@@ -63,14 +69,16 @@ void Spider::crawl(const std::string& url, int depth) {
     std::unordered_map<std::string, int> freq;
     splitAndCountWords(cleaned, freq);
 
-    for (auto& p : freq) {
+    for (auto& p : freq) 
+    {
         std::lock_guard<std::mutex> lg(m_dbMutex);
         int wordId = m_db.insertWord(p.first);
         m_db.insertDocumentWord(docId, wordId, p.second);
     }
 
     auto links = extractLinks(html, url);
-    for (auto& lnk : links) {
+    for (auto& lnk : links) 
+    {
         std::string normalized = normalizeUrl(lnk, url);
         if (normalized.empty()) continue;
 
@@ -80,10 +88,12 @@ void Spider::crawl(const std::string& url, int depth) {
     }
 }
 
-std::string Spider::fetchPage(const std::string& url) {
+std::string Spider::fetchPage(const std::string& url)
+{
     static const std::regex urlRe(R"(^(https?)://([^/]+)(/.*)?$)", std::regex::icase);
     std::smatch m;
-    if (!std::regex_match(url, m, urlRe)) {
+    if (!std::regex_match(url, m, urlRe))
+    {
         throw std::runtime_error("Invalid URL: " + url);
     }
 
@@ -94,7 +104,8 @@ std::string Spider::fetchPage(const std::string& url) {
 
     boost::asio::io_context ioc;
 
-    if (scheme == "http") {
+    if (scheme == "http")
+    {
         tcp::resolver resolver(ioc);
         beast::tcp_stream stream(ioc);
 
@@ -116,14 +127,16 @@ std::string Spider::fetchPage(const std::string& url) {
 
         return res.body();
     }
-    else { // https
+    else
+    { // https
         ssl::context ctx{ ssl::context::sslv23_client };
         ctx.set_default_verify_paths();
 
         tcp::resolver resolver(ioc);
         beast::ssl_stream<beast::tcp_stream> stream(ioc, ctx);
 
-        if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) {
+        if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) 
+        {
             throw beast::system_error(
                 beast::error_code(static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()),
                 "Failed to set SNI Hostname");
@@ -151,23 +164,27 @@ std::string Spider::fetchPage(const std::string& url) {
     }
 }
 
-std::string Spider::extractTitle(const std::string& html) {
+std::string Spider::extractTitle(const std::string& html) 
+{
     static const std::regex titleRe(R"(<title[^>]*>(.*?)</title>)", std::regex::icase);
     std::smatch m;
-    if (std::regex_search(html, m, titleRe)) {
+    if (std::regex_search(html, m, titleRe)) 
+    {
         return m[1].str();
     }
     return {};
 }
 
-std::string Spider::cleanText(const std::string& html) {
+std::string Spider::cleanText(const std::string& html)
+{
     std::string s = std::regex_replace(html, std::regex(R"(<script[\s\S]*?</script>)", std::regex::icase), " ");
     s = std::regex_replace(s, std::regex(R"(<style[\s\S]*?</style>)", std::regex::icase), " ");
     s = std::regex_replace(s, std::regex(R"(<[^>]*>)"), " ");
 
     std::string out;
     out.reserve(s.size());
-    for (unsigned char ch : s) {
+    for (unsigned char ch : s) 
+    {
         if (std::isalnum(ch)) out.push_back(static_cast<char>(ch));
         else out.push_back(' ');
     }
@@ -178,13 +195,15 @@ std::string Spider::cleanText(const std::string& html) {
     std::string compact;
     bool lastSpace = true;
     for (char c : out) {
-        if (std::isspace(static_cast<unsigned char>(c))) {
+        if (std::isspace(static_cast<unsigned char>(c)))
+        {
             if (!lastSpace) {
                 compact.push_back(' ');
                 lastSpace = true;
             }
         }
-        else {
+        else 
+        {
             compact.push_back(c);
             lastSpace = false;
         }
@@ -194,12 +213,14 @@ std::string Spider::cleanText(const std::string& html) {
     return compact;
 }
 
-std::vector<std::string> Spider::extractLinks(const std::string& html, const std::string& baseUrl) {
+std::vector<std::string> Spider::extractLinks(const std::string& html, const std::string& baseUrl) 
+{
     std::vector<std::string> links;
     static const std::regex hrefRe(R"(<a\s+[^>]*?href\s*=\s*['"]([^'"]+)['"][^>]*>)", std::regex::icase);
     auto it = std::sregex_iterator(html.begin(), html.end(), hrefRe);
     auto end = std::sregex_iterator();
-    for (; it != end; ++it) {
+    for (; it != end; ++it)
+    {
         std::string raw = (*it)[1].str();
         if (raw.empty()) continue;
         if (raw.rfind("javascript:", 0) == 0) continue;
@@ -212,7 +233,8 @@ std::vector<std::string> Spider::extractLinks(const std::string& html, const std
     return links;
 }
 
-std::string Spider::normalizeUrl(const std::string& link, const std::string& baseUrl) {
+std::string Spider::normalizeUrl(const std::string& link, const std::string& baseUrl)
+{
     if (link.rfind("http://", 0) == 0 || link.rfind("https://", 0) == 0) return link;
     if (link.rfind("//", 0) == 0) return "http:" + link;
 
@@ -224,26 +246,31 @@ std::string Spider::normalizeUrl(const std::string& link, const std::string& bas
     std::string path = m[2].str();
     if (path.empty()) path = "/";
 
-    if (!link.empty() && link[0] == '/') {
+    if (!link.empty() && link[0] == '/') 
+    {
         return "http://" + host + link;
     }
-    else {
+    else
+    {
         auto pos = path.find_last_of('/');
         std::string basePath = (pos == std::string::npos) ? "/" : path.substr(0, pos + 1);
         return "http://" + host + basePath + link;
     }
 }
 
-void Spider::splitAndCountWords(const std::string& text, std::unordered_map<std::string, int>& outFreq) {
+void Spider::splitAndCountWords(const std::string& text, std::unordered_map<std::string, int>& outFreq)
+{
     std::istringstream iss(text);
     std::string token;
-    while (iss >> token) {
+    while (iss >> token)
+    {
         if (token.size() < 3 || token.size() > 32) continue;
         outFreq[token]++;
     }
 }
 
-std::string Spider::toLower(const std::string& s) {
+std::string Spider::toLower(const std::string& s) 
+{
     std::string r = s;
     std::transform(r.begin(), r.end(), r.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });

@@ -1,13 +1,21 @@
 #include "DBase.h"
+#include <pqxx/pqxx>
 #include <iostream>
+#include <sstream>
+#include <stdexcept>
 
-Database::Database(const std::string& connectionString) : m_conn(connectionString) {
+Database::Database(const std::string& connectionString) : m_connStr(connectionString) 
+{
     createTables();
 }
 
-void Database::createTables() {
+Database::~Database() {}
+
+void Database::createTables() 
+{
     try {
-        pqxx::work txn(m_conn);
+        pqxx::connection conn(m_connStr);
+        pqxx::work txn(conn);
 
         txn.exec(R"(
             CREATE TABLE IF NOT EXISTS Documents (
@@ -35,16 +43,18 @@ void Database::createTables() {
         )");
 
         txn.commit();
-        std::cout << "[DB] Таблицы успешно созданы или уже существуют." << std::endl;
+        std::cout << "[DB] Tables created or already exist." << std::endl;
     }
     catch (const std::exception& e) {
-        std::cerr << "[DB] Ошибка при создании таблиц: " << e.what() << std::endl;
+        std::cerr << "[DB] createTables error: " << e.what() << std::endl;
         throw;
     }
 }
 
-int Database::insertDocument(const std::string& url, const std::string& title, const std::string& content) {
-    pqxx::work txn(m_conn);
+int Database::insertDocument(const std::string& url, const std::string& title, const std::string& content)
+{
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
     pqxx::result r = txn.exec_params(
         "INSERT INTO Documents (url, title, content) VALUES ($1, $2, $3) "
         "ON CONFLICT (url) DO UPDATE SET title=EXCLUDED.title, content=EXCLUDED.content "
@@ -56,8 +66,10 @@ int Database::insertDocument(const std::string& url, const std::string& title, c
     return id;
 }
 
-int Database::insertWord(const std::string& word) {
-    pqxx::work txn(m_conn);
+int Database::insertWord(const std::string& word) 
+{
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
     pqxx::result r = txn.exec_params(
         "INSERT INTO Words (word) VALUES ($1) "
         "ON CONFLICT (word) DO UPDATE SET word=EXCLUDED.word "
@@ -69,8 +81,10 @@ int Database::insertWord(const std::string& word) {
     return id;
 }
 
-void Database::insertDocumentWord(int document_id, int word_id, int frequency) {
-    pqxx::work txn(m_conn);
+void Database::insertDocumentWord(int document_id, int word_id, int frequency) 
+{
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
     txn.exec_params(
         "INSERT INTO DocumentWords (document_id, word_id, frequency) VALUES ($1, $2, $3) "
         "ON CONFLICT (document_id, word_id) DO UPDATE SET frequency = EXCLUDED.frequency",
@@ -79,23 +93,29 @@ void Database::insertDocumentWord(int document_id, int word_id, int frequency) {
     txn.commit();
 }
 
-int Database::GetDocumentId(const std::string& url) {
-    pqxx::work txn(m_conn);
+int Database::GetDocumentId(const std::string& url)
+{
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
     pqxx::result r = txn.exec_params("SELECT id FROM Documents WHERE url = $1", url);
     if (r.empty()) return -1;
     return r[0][0].as<int>();
 }
 
-int Database::GetWordId(const std::string& word) {
-    pqxx::work txn(m_conn);
+int Database::GetWordId(const std::string& word)
+{
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
     pqxx::result r = txn.exec_params("SELECT id FROM Words WHERE word = $1", word);
     if (r.empty()) return -1;
     return r[0][0].as<int>();
 }
 
-std::vector<std::pair<std::string, int>> Database::GetDocumentsByWord(const std::string& word) {
+std::vector<std::pair<std::string, int>> Database::GetDocumentsByWord(const std::string& word) 
+{
     std::vector<std::pair<std::string, int>> results;
-    pqxx::work txn(m_conn);
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
 
     pqxx::result r = txn.exec_params(R"(
         SELECT d.url, dw.frequency
@@ -106,15 +126,18 @@ std::vector<std::pair<std::string, int>> Database::GetDocumentsByWord(const std:
         ORDER BY dw.frequency DESC
     )", word);
 
-    for (auto row : r) {
+    for (auto row : r)
+    {
         results.emplace_back(row["url"].as<std::string>(), row["frequency"].as<int>());
     }
     return results;
 }
 
-std::vector<std::pair<std::string, int>> Database::GetWordsByDocument(int document_id) {
+std::vector<std::pair<std::string, int>> Database::GetWordsByDocument(int document_id) 
+{
     std::vector<std::pair<std::string, int>> results;
-    pqxx::work txn(m_conn);
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
 
     pqxx::result r = txn.exec_params(R"(
         SELECT w.word, dw.frequency
@@ -124,15 +147,31 @@ std::vector<std::pair<std::string, int>> Database::GetWordsByDocument(int docume
         ORDER BY dw.frequency DESC
     )", document_id);
 
-    for (auto row : r) {
+    for (auto row : r)
+    {
         results.emplace_back(row["word"].as<std::string>(), row["frequency"].as<int>());
     }
     return results;
 }
 
-std::vector<SearchResult> Database::SearchDocumentsByWords(const std::vector<std::string>& words) {
+std::vector<SearchResult> Database::SearchDocumentsByWords(const std::vector<std::string>& words) 
+{
     std::vector<SearchResult> results;
     if (words.empty()) return results;
+
+    // Build SQL that uses array parameter
+    std::ostringstream arr;
+    arr << "{";
+    for (size_t i = 0; i < words.size(); ++i) 
+    {
+        // Escape double quotes by backslash (basic)
+        std::string w = words[i];
+        size_t pos = 0;
+        while ((pos = w.find('"', pos)) != std::string::npos) { w.replace(pos, 1, "\\\""); pos += 2; }
+        arr << "\"" << w << "\"";
+        if (i + 1 < words.size()) arr << ",";
+    }
+    arr << "}";
 
     std::string sql = R"(
         SELECT d.url, d.title, SUM(dw.frequency) AS relevance
@@ -141,28 +180,21 @@ std::vector<SearchResult> Database::SearchDocumentsByWords(const std::vector<std
         JOIN Words w ON dw.word_id = w.id
         WHERE w.word = ANY($1)
         GROUP BY d.url, d.title
-        HAVING COUNT(DISTINCT w.word) = array_length($1, 1)
+        HAVING COUNT(DISTINCT w.word) = array_length($1,1)
         ORDER BY relevance DESC
         LIMIT 10
     )";
 
-    pqxx::work txn(m_conn);
-
-    // vector<string> ? PostgreSQL массив
-    std::string arrayLiteral = "{";
-    for (size_t i = 0; i < words.size(); i++) {
-        arrayLiteral += "\"" + words[i] + "\"";
-        if (i + 1 < words.size()) arrayLiteral += ",";
-    }
-    arrayLiteral += "}";
-
-    pqxx::result r = txn.exec_params(sql, arrayLiteral);
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
+    pqxx::result r = txn.exec_params(sql, arr.str());
     txn.commit();
 
-    for (auto row : r) {
+    for (auto row : r) 
+    {
         SearchResult sr;
         sr.url = row["url"].as<std::string>();
-        sr.title = row["title"].as<std::string>();
+        sr.title = row["title"].is_null() ? std::string() : row["title"].as<std::string>();
         sr.rank = row["relevance"].as<int>();
         results.push_back(sr);
     }
@@ -170,8 +202,10 @@ std::vector<SearchResult> Database::SearchDocumentsByWords(const std::vector<std
     return results;
 }
 
-void Database::clearAll() {
-    pqxx::work txn(m_conn);
+void Database::clearAll() 
+{
+    pqxx::connection conn(m_connStr);
+    pqxx::work txn(conn);
     txn.exec("TRUNCATE DocumentWords, Words, Documents RESTART IDENTITY CASCADE");
     txn.commit();
 }
