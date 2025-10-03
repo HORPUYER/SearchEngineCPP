@@ -12,19 +12,19 @@ namespace http = beast::http;
 namespace ssl = boost::asio::ssl;
 
 Spider::Spider(Config& config, Database& db, std::size_t threads)
-    : m_config(config), m_db(db), m_pool(threads), m_threads(threads){
+    : m_config(config), m_db(db), m_pool(threads), m_threads(threads) {
 }
 
-Spider::~Spider() 
+Spider::~Spider()
 {
     try { m_pool.join(); }
     catch (...) {}
 }
 
-void Spider::run() 
+void Spider::run()
 {
     std::string start = m_config.GetStartPage();
-    if (start.empty()) 
+    if (start.empty())
     {
         std::cerr << "Start page not configured\n";
         return;
@@ -47,12 +47,10 @@ void Spider::crawl(const std::string& url, int depth)
     }
 
     std::string html;
-    try
-    {
+    try {
         html = fetchPage(url);
     }
-    catch (const std::exception& e) 
-    {
+    catch (const std::exception& e) {
         std::cerr << "fetchPage failed for " << url << " : " << e.what() << std::endl;
         return;
     }
@@ -69,16 +67,18 @@ void Spider::crawl(const std::string& url, int depth)
     std::unordered_map<std::string, int> freq;
     splitAndCountWords(cleaned, freq);
 
-    for (auto& p : freq) 
     {
         std::lock_guard<std::mutex> lg(m_dbMutex);
-        int wordId = m_db.insertWord(p.first);
-        m_db.insertDocumentWord(docId, wordId, p.second);
+        pqxx::work txn(m_db.connection());
+        for (auto& p : freq) {
+            int wordId = m_db.insertWordTxn(txn, p.first);
+            m_db.insertDocumentWordTxn(txn, docId, wordId, p.second);
+        }
+        txn.commit();
     }
 
     auto links = extractLinks(html, url);
-    for (auto& lnk : links) 
-    {
+    for (auto& lnk : links) {
         std::string normalized = normalizeUrl(lnk, url);
         if (normalized.empty()) continue;
 
@@ -88,12 +88,13 @@ void Spider::crawl(const std::string& url, int depth)
     }
 }
 
-std::string Spider::fetchPage(const std::string& url)
+std::string Spider::fetchPage(const std::string& url, int redirectDepth)
 {
+    if (redirectDepth > 5) throw std::runtime_error("Too many redirects");
+
     static const std::regex urlRe(R"(^(https?)://([^/]+)(/.*)?$)", std::regex::icase);
     std::smatch m;
-    if (!std::regex_match(url, m, urlRe))
-    {
+    if (!std::regex_match(url, m, urlRe)) {
         throw std::runtime_error("Invalid URL: " + url);
     }
 
@@ -125,6 +126,14 @@ std::string Spider::fetchPage(const std::string& url)
         beast::error_code ec;
         stream.socket().shutdown(tcp::socket::shutdown_both, ec);
 
+        if (res.result_int() >= 300 && res.result_int() < 400) {
+            auto it = res.find(http::field::location);
+            if (it != res.end()) {
+                std::string redirectUrl(it->value());
+                return fetchPage(redirectUrl, redirectDepth + 1);
+            }
+        }
+
         return res.body();
     }
     else
@@ -135,7 +144,7 @@ std::string Spider::fetchPage(const std::string& url)
         tcp::resolver resolver(ioc);
         beast::ssl_stream<beast::tcp_stream> stream(ioc, ctx);
 
-        if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) 
+        if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))
         {
             throw beast::system_error(
                 beast::error_code(static_cast<int>(::ERR_get_error()), boost::asio::error::get_ssl_category()),
@@ -160,16 +169,23 @@ std::string Spider::fetchPage(const std::string& url)
         beast::error_code ec;
         beast::get_lowest_layer(stream).socket().shutdown(tcp::socket::shutdown_both, ec);
 
+        if (res.result_int() >= 300 && res.result_int() < 400) {
+            auto it = res.find(http::field::location);
+            if (it != res.end()) {
+                std::string redirectUrl(it->value());
+                return fetchPage(redirectUrl, redirectDepth + 1);
+            }
+        }
+
         return res.body();
     }
 }
 
-std::string Spider::extractTitle(const std::string& html) 
+std::string Spider::extractTitle(const std::string& html)
 {
     static const std::regex titleRe(R"(<title[^>]*>(.*?)</title>)", std::regex::icase);
     std::smatch m;
-    if (std::regex_search(html, m, titleRe)) 
-    {
+    if (std::regex_search(html, m, titleRe)) {
         return m[1].str();
     }
     return {};
@@ -183,8 +199,7 @@ std::string Spider::cleanText(const std::string& html)
 
     std::string out;
     out.reserve(s.size());
-    for (unsigned char ch : s) 
-    {
+    for (unsigned char ch : s) {
         if (std::isalnum(ch)) out.push_back(static_cast<char>(ch));
         else out.push_back(' ');
     }
@@ -195,15 +210,13 @@ std::string Spider::cleanText(const std::string& html)
     std::string compact;
     bool lastSpace = true;
     for (char c : out) {
-        if (std::isspace(static_cast<unsigned char>(c)))
-        {
+        if (std::isspace(static_cast<unsigned char>(c))) {
             if (!lastSpace) {
                 compact.push_back(' ');
                 lastSpace = true;
             }
         }
-        else 
-        {
+        else {
             compact.push_back(c);
             lastSpace = false;
         }
@@ -213,7 +226,7 @@ std::string Spider::cleanText(const std::string& html)
     return compact;
 }
 
-std::vector<std::string> Spider::extractLinks(const std::string& html, const std::string& baseUrl) 
+std::vector<std::string> Spider::extractLinks(const std::string& html, const std::string& baseUrl)
 {
     std::vector<std::string> links;
     static const std::regex hrefRe(R"(<a\s+[^>]*?href\s*=\s*['"]([^'"]+)['"][^>]*>)", std::regex::icase);
@@ -246,7 +259,7 @@ std::string Spider::normalizeUrl(const std::string& link, const std::string& bas
     std::string path = m[2].str();
     if (path.empty()) path = "/";
 
-    if (!link.empty() && link[0] == '/') 
+    if (!link.empty() && link[0] == '/')
     {
         return "http://" + host + link;
     }
@@ -269,7 +282,7 @@ void Spider::splitAndCountWords(const std::string& text, std::unordered_map<std:
     }
 }
 
-std::string Spider::toLower(const std::string& s) 
+std::string Spider::toLower(const std::string& s)
 {
     std::string r = s;
     std::transform(r.begin(), r.end(), r.begin(),

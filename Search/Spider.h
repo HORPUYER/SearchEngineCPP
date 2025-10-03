@@ -44,7 +44,7 @@ private:
     void crawl(const std::string& url, int depth);
 
     // HTTP/HTTPS
-    std::string fetchPage(const std::string& url);
+    std::string fetchPage(const std::string& url, int redirectDepth = 0);
 
     // Парсинг/индексация
     std::string extractTitle(const std::string& html);
